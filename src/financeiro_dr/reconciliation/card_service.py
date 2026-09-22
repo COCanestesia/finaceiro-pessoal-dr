@@ -38,4 +38,5 @@ class CardReconciliationService:
         if match is None:raise ValueError('Compra não é candidata válida.')
         self.connection.execute("INSERT INTO card_reconciliation_link(statement_row_id,purchase_id,status,score,confirmed_at) VALUES (?,?,'CONCILIADO',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",(row_id,purchase_id,match.score));self.connection.commit()
     def mark_divergent(self,row_id:int,note:str)->None:self.connection.execute("INSERT INTO card_reconciliation_link(statement_row_id,status,note,confirmed_at) VALUES (?,'DIVERGENTE',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",(row_id,note));self.connection.commit()
+    def ignore(self,row_id:int)->None:self.connection.execute('UPDATE card_statement_row SET ignored=1 WHERE id=?',(row_id,));self.connection.commit()
     def pending_count(self)->int:return int(self.connection.execute("SELECT COUNT(*) FROM card_statement_row sr WHERE sr.ignored=0 AND NOT EXISTS(SELECT 1 FROM card_reconciliation_link rl WHERE rl.statement_row_id=sr.id AND rl.status IN ('CONCILIADO','DIVERGENTE'))").fetchone()[0])
