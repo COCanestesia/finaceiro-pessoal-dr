@@ -82,9 +82,13 @@ class FinancialService:
             if owns:self._rollback()
             raise
     def find_possible_duplicate(self,c:CreateEntry)->FinancialEntry|None:
-        n=_normalize_description(c.description)
-        for x in self.repository.candidates_by_amount(c.amount_cents):
-            if _normalize_description(x.description)==n and (_within_one_day(x.competence_date,c.competence_date) or _within_one_day(x.due_date,c.due_date)):return x
+        normalized=_normalize_description(c.description)
+        for candidate in self.repository.candidates_by_amount(c.amount_cents):
+            if candidate.entry_type!=c.entry_type:continue
+            if candidate.bank_account_id!=c.bank_account_id:continue
+            if candidate.card_id!=c.card_id:continue
+            if _normalize_description(candidate.description)!=normalized:continue
+            if _within_one_day(candidate.competence_date,c.competence_date) or _within_one_day(candidate.due_date,c.due_date):return candidate
         return None
     def duplicate_entry(self,entry_id:int,due_date:date|None=None)->int:
         s=self.repository.get(entry_id)
