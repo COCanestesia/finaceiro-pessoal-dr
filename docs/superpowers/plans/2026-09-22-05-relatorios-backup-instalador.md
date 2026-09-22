@@ -132,7 +132,7 @@ git add src tests
 ### Task 3: Backup consistente e automático
 
 **Files:**
-- Create: `src/financeiro_dr/database/migrations/011_backup_log.sql`
+- Create: `src/financeiro_dr/database/migrations/012_backup_log.sql`
 - Create: `src/financeiro_dr/backup/models.py`
 - Create: `src/financeiro_dr/backup/service.py`
 - Create: `src/financeiro_dr/backup/scheduler.py`
