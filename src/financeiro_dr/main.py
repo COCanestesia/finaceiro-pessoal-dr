@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QApplication,QDialog,QLabel
 from financeiro_dr.app_paths import AppPaths
 from financeiro_dr.audit.audit_service import AuditService
 from financeiro_dr.core.financeiro.agenda import AgendaService
+from financeiro_dr.core.financeiro.dashboard import DashboardService
 from financeiro_dr.core.financeiro.payables import PayablesService
 from financeiro_dr.core.financeiro.repository import FinancialRepository
 from financeiro_dr.core.financeiro.scheduling import SchedulingService
@@ -21,7 +22,7 @@ from financeiro_dr.ui.pages.receivables_page import ReceivablesPage
 
 def build_window(connection)->MainWindow:
     repo=FinancialRepository(connection); finance=FinancialService(connection,repo,AuditService(connection)); scheduling=SchedulingService(connection,finance,repo); payables=PayablesService(repo,finance); agenda=AgendaService(repo); window=MainWindow()
-    window.add_page("dashboard","Início",DashboardPage(repo,payables)); window.add_page("entries","Lançamentos",EntriesPage(finance,scheduling,repo)); window.add_page("payables","Contas a Pagar",PayablesPage(payables)); window.add_page("receivables","Contas a Receber",ReceivablesPage(payables)); window.add_page("agenda","Agenda Financeira",AgendaPage(agenda)); window.add_page("history","Histórico",QLabel("Histórico detalhado será ampliado nas próximas etapas.")); window.add_page("settings","Configurações",QLabel("Configurações completas entram na etapa de backup e instalador.")); return window
+    window.add_page("dashboard","Início",DashboardPage(DashboardService(repo))); window.add_page("entries","Lançamentos",EntriesPage(finance,scheduling,repo)); window.add_page("payables","Contas a Pagar",PayablesPage(payables)); window.add_page("receivables","Contas a Receber",ReceivablesPage(payables)); window.add_page("agenda","Agenda Financeira",AgendaPage(agenda)); window.add_page("history","Histórico",QLabel("Histórico detalhado será ampliado nas próximas etapas.")); window.add_page("settings","Configurações",QLabel("Configurações completas entram na etapa de backup e instalador.")); return window
 
 def main()->int:
     app=QApplication.instance() or QApplication(sys.argv); paths=AppPaths.from_environment(); connection=Database(paths.database_file).connect(); MigrationRunner().apply_all(connection); auth=AuthService(connection); login=LoginDialog(auth,setup_mode=not auth.has_password())
