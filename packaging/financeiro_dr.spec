@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
-root = Path(SPECPATH).resolve().parent.parent
+root = Path(SPECPATH).resolve().parent
 src = root / "src"
 migrations = src / "financeiro_dr" / "database" / "migrations"
 
