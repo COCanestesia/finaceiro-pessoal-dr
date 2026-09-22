@@ -1,0 +1,56 @@
+name: Windows build
+
+on:
+  push:
+    branches:
+      - feat/phase1-daily-finance
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install pyinstaller
+      - name: Run tests
+        shell: pwsh
+        run: pytest -q
+      - name: Build portable application
+        shell: pwsh
+        run: pyinstaller packaging/financeiro_dr.spec --noconfirm --clean
+      - name: Smoke test built executable
+        shell: pwsh
+        run: |
+          $env:LOCALAPPDATA = "$env:RUNNER_TEMP\financeiro-local"
+          $env:APPDATA = "$env:RUNNER_TEMP\financeiro-roaming"
+          & ".\dist\FinanceiroPessoalDr\FinanceiroPessoalDr.exe" --smoke-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "packaging\installer.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Create portable zip
+        shell: pwsh
+        run: Compress-Archive -Path ".\dist\FinanceiroPessoalDr\*" -DestinationPath ".\dist\FinanceiroPessoalDr-Portable.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FinanceiroPessoalDr-Windows
+          path: |
+            dist/installer/FinanceiroPessoalDr-Setup.exe
+            dist/FinanceiroPessoalDr-Portable.zip
+          if-no-files-found: error
