@@ -1,5 +1,5 @@
 #define MyAppName "Financeiro Pessoal do Dr."
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.0"
 #define MyAppExeName "FinanceiroPessoalDr.exe"
 
 [Setup]
