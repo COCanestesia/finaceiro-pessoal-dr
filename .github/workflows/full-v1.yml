@@ -8,6 +8,7 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Final V1 validation: full tests, Windows package smoke test, installer and portable artifact.
 jobs:
   test:
     runs-on: ubuntu-latest
