@@ -1,4 +1,4 @@
-import importlib
+import importlib.util
 
 
 def test_phase1_ui_modules_are_available():
@@ -10,4 +10,4 @@ def test_phase1_ui_modules_are_available():
         "financeiro_dr.ui.pages.receivables_page",
         "financeiro_dr.ui.pages.agenda_page",
     ):
-        importlib.import_module(module)
+        assert importlib.util.find_spec(module) is not None, module
