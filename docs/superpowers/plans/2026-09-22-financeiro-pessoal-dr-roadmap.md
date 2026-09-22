@@ -1,6 +1,6 @@
 # Financeiro Pessoal do Dr. — Roadmap de Implementação
 
-> Este roadmap divide a especificação aprovada em cinco planos independentes e testáveis. Cada plano entrega software executável e preserva as interfaces necessárias para o plano seguinte.
+> Este roadmap divide a especificação aprovada em seis planos independentes e testáveis. Cada plano entrega software executável e preserva as interfaces necessárias para o plano seguinte.
 
 **Spec:** `docs/superpowers/specs/2026-09-22-financeiro-pessoal-dr-design.md`
 
@@ -22,7 +22,11 @@
    - Patrimônio, investimentos, documentos/comprovantes, busca e vínculos com lançamentos.
    - Entrega: visão patrimonial e arquivos financeiros organizados localmente.
 
-5. `2026-09-22-05-relatorios-backup-instalador.md`
+5. `2026-09-22-04b-integridade-auditoria-indicadores.md`
+   - Origem de receitas, despesas fixas x variáveis, auditoria completa, histórico de alterações, integridade do banco e gráficos com drill-down.
+   - Entrega: requisitos transversais fechados antes da geração dos relatórios finais e do instalador.
+
+6. `2026-09-22-05-relatorios-backup-instalador.md`
    - Relatórios PDF/Excel, detalhamento, backup automático/manual, restauração, configurações e empacotamento para Windows.
    - Entrega: versão 1 instalável e pronta para uso diário no computador do financeiro pessoal.
 
@@ -40,4 +44,4 @@
 
 ## Critério de conclusão da versão 1
 
-A versão 1 termina somente quando os cinco planos estiverem implementados e verificados, incluindo teste manual no Windows, backup/restauração e geração do instalador.
+A versão 1 termina somente quando os seis planos estiverem implementados e verificados, incluindo teste manual no Windows, backup/restauração e geração do instalador.
