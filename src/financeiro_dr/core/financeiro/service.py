@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import replace
 from datetime import date
 import sqlite3,unicodedata
 from financeiro_dr.audit.audit_service import AuditService
@@ -11,26 +12,34 @@ def _within_one_day(a,b):return a is not None and b is not None and abs((a-b).da
 class FinancialService:
     def __init__(self,connection:sqlite3.Connection,repository:FinancialRepository|None=None,audit_service:AuditService|None=None):self.connection=connection;self.repository=repository or FinancialRepository(connection);self.audit_service=audit_service or AuditService(connection)
     def _exists_active(self,table,item_id):return item_id is None or self.connection.execute(f'SELECT 1 FROM {table} WHERE id=? AND active=1',(item_id,)).fetchone() is not None
-    def _validate_command(self,c:CreateEntry)->None:
-        if not c.description.strip():raise ValueError('Informe a descrição do lançamento.')
-        if c.amount_cents<0:raise ValueError('O valor não pode ser negativo.')
-        if c.entry_type not in ENTRY_TYPES:raise ValueError('Tipo de lançamento inválido.')
-        if c.status not in ENTRY_STATUSES:raise ValueError('Status de lançamento inválido.')
-        if c.entry_type=='DESPESA' and c.expense_nature not in EXPENSE_NATURES:raise ValueError('Informe se a despesa é Fixa ou Variável.')
-        if c.beneficiary_id is not None and not self._exists_active('person',c.beneficiary_id):raise ValueError('Pessoa/beneficiário não encontrado ou inativo.')
-        if c.category_id is not None and not self._exists_active('category',c.category_id):raise ValueError('Categoria não encontrada ou inativa.')
-        if c.subcategory_id is not None:
-            r=self.connection.execute('SELECT category_id,active FROM subcategory WHERE id=?',(c.subcategory_id,)).fetchone()
-            if r is None or not r['active'] or c.category_id is None or r['category_id']!=c.category_id:raise ValueError('Subcategoria não pertence à categoria selecionada.')
-        for table,item,msg in [('cost_center',c.cost_center_id,'Centro de custo'),('bank_account',c.bank_account_id,'Conta bancária'),('credit_card',c.card_id,'Cartão'),('asset',c.asset_id,'Patrimônio')]:
+    def _normalize_command(self,c:CreateEntry)->CreateEntry:
+        if c.entry_type=='DESPESA' and c.expense_nature is None:c=replace(c,expense_nature='VARIAVEL')
+        elif c.entry_type!='DESPESA' and c.expense_nature is not None:c=replace(c,expense_nature=None)
+        return c
+    def _validate_values(self,v:dict)->None:
+        if not str(v.get('description') or '').strip():raise ValueError('Informe a descrição do lançamento.')
+        if int(v.get('amount_cents',0))<0:raise ValueError('O valor não pode ser negativo.')
+        if v.get('entry_type') not in ENTRY_TYPES:raise ValueError('Tipo de lançamento inválido.')
+        if v.get('status') not in ENTRY_STATUSES:raise ValueError('Status de lançamento inválido.')
+        if v.get('entry_type')=='DESPESA' and v.get('expense_nature') not in EXPENSE_NATURES:raise ValueError('Informe se a despesa é Fixa ou Variável.')
+        if v.get('beneficiary_id') is not None and not self._exists_active('person',v['beneficiary_id']):raise ValueError('Pessoa/beneficiário não encontrado ou inativo.')
+        if v.get('category_id') is not None and not self._exists_active('category',v['category_id']):raise ValueError('Categoria não encontrada ou inativa.')
+        if v.get('subcategory_id') is not None:
+            r=self.connection.execute('SELECT category_id,active FROM subcategory WHERE id=?',(v['subcategory_id'],)).fetchone()
+            if r is None or not r['active'] or v.get('category_id') is None or int(r['category_id'])!=int(v['category_id']):raise ValueError('Subcategoria não pertence à categoria selecionada.')
+        for table,key,msg in [('cost_center','cost_center_id','Centro de custo'),('bank_account','bank_account_id','Conta bancária'),('credit_card','card_id','Cartão'),('asset','asset_id','Patrimônio')]:
+            item=v.get(key)
             if item is not None and not self._exists_active(table,item):raise ValueError(f'{msg} não encontrado ou inativo.')
-        if c.income_source_id is not None and not self.connection.execute('SELECT 1 FROM income_source WHERE id=?',(c.income_source_id,)).fetchone():raise ValueError('Origem da receita não encontrada.')
+        source=v.get('income_source_id')
+        if source is not None and not self._exists_active('income_source',source):raise ValueError('Origem da receita não encontrada ou inativa.')
+    def _validate_command(self,c:CreateEntry)->None:self._validate_values(c.__dict__)
     def _begin(self):self.connection.execute('BEGIN IMMEDIATE')
     def _rollback(self):
         if self.connection.in_transaction:self.connection.rollback()
     def create_entry(self,c:CreateEntry)->int:return self.create_entries([c])[0]
     def create_entries(self,commands:list[CreateEntry])->list[int]:
         if not commands:return []
+        commands=[self._normalize_command(c) for c in commands]
         for c in commands:self._validate_command(c)
         owns=not self.connection.in_transaction
         if owns:self._begin()
@@ -45,23 +54,33 @@ class FinancialService:
             if owns:self._rollback()
             raise
     def update_entry(self,entry_id:int,changes:dict)->None:
-        unknown=set(changes)-MUTABLE_FIELDS
+        changes=dict(changes);unknown=set(changes)-MUTABLE_FIELDS
         if unknown:raise ValueError(f'Campo de lançamento não editável: {sorted(unknown)[0]}')
-        self._begin()
+        owns=not self.connection.in_transaction
+        if owns:self._begin()
         try:
             before=self.repository.snapshot(entry_id,False)
             if before is None:raise EntryNotFoundError('Lançamento não encontrado.')
-            merged=dict(before);merged.update(changes)
-            if merged.get('entry_type')=='DESPESA' and merged.get('expense_nature') not in EXPENSE_NATURES:raise ValueError('Informe se a despesa é Fixa ou Variável.')
-            self.repository.update(entry_id,changes);after=self.repository.snapshot(entry_id,False);self.audit_service.record_update('financial_entry',entry_id,{k:before.get(k) for k in changes},{k:(after or {}).get(k) for k in changes});self.connection.commit()
-        except Exception:self._rollback();raise
+            merged=dict(before);merged.update(changes);effective_type=merged.get('entry_type')
+            if effective_type=='DESPESA' and merged.get('expense_nature') is None:changes['expense_nature']='VARIAVEL';merged['expense_nature']='VARIAVEL'
+            elif effective_type!='DESPESA' and merged.get('expense_nature') is not None:changes['expense_nature']=None;merged['expense_nature']=None
+            self._validate_values(merged)
+            self.repository.update(entry_id,changes);after=self.repository.snapshot(entry_id,False);self.audit_service.record_update('financial_entry',entry_id,{k:before.get(k) for k in changes},{k:(after or {}).get(k) for k in changes})
+            if owns:self.connection.commit()
+        except Exception:
+            if owns:self._rollback()
+            raise
     def soft_delete(self,entry_id:int)->None:
-        self._begin()
+        owns=not self.connection.in_transaction
+        if owns:self._begin()
         try:
             before=self.repository.snapshot(entry_id,False)
             if before is None:raise EntryNotFoundError('Lançamento não encontrado.')
-            self.repository.soft_delete(entry_id);self.audit_service.record_delete('financial_entry',entry_id,before);self.connection.commit()
-        except Exception:self._rollback();raise
+            self.repository.soft_delete(entry_id);self.audit_service.record_delete('financial_entry',entry_id,before)
+            if owns:self.connection.commit()
+        except Exception:
+            if owns:self._rollback()
+            raise
     def find_possible_duplicate(self,c:CreateEntry)->FinancialEntry|None:
         n=_normalize_description(c.description)
         for x in self.repository.candidates_by_amount(c.amount_cents):

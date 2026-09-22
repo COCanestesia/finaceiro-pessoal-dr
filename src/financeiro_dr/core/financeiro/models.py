@@ -29,7 +29,7 @@ class CreateEntry:
     bank_account_id:int|None=None
     card_id:int|None=None
     asset_id:int|None=None
-    expense_nature:str|None="VARIAVEL"
+    expense_nature:str|None=None
     income_source_id:int|None=None
     allow_duplicate:bool=False
 
