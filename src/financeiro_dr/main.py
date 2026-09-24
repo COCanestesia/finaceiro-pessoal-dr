@@ -16,6 +16,8 @@ from financeiro_dr.database.connection import Database
 from financeiro_dr.database.health import DatabaseHealth
 from financeiro_dr.database.migrations import MigrationRunner
 from financeiro_dr.documents import DocumentService
+from financeiro_dr.initial_seed.loader import InitialSeedError,load_manifest
+from financeiro_dr.initial_seed.service import InitialDataSeedService
 from financeiro_dr.people import PeopleService
 from financeiro_dr.security.auth_service import AuthService
 from financeiro_dr.settings import SettingsService
@@ -33,6 +35,13 @@ def build_window(connection,paths:AppPaths|None=None)->MainWindow:
     paths=paths or AppPaths.from_environment();repo=FinancialRepository(connection);audit=AuditService(connection);finance=FinancialService(connection,repo,audit);scheduling=SchedulingService(connection,finance,repo);payables=PayablesService(repo,finance);agenda=AgendaService(repo);config=paths.config_dir/'config.json';settings=SettingsService(config);documents=DocumentService(connection,paths.documents_dir);backup=BackupService(connection,paths.database_file,paths.documents_dir,config);restore=RestoreService(connection,paths.database_file,paths.documents_dir);auth=AuthService(connection);w=MainWindow();w.add_page('dashboard','Início',DashboardPage(DashboardService(repo),connection));w.add_page('entries','Lançamentos',EntriesPage(finance,scheduling,repo,connection));w.add_page('payables','Contas a Pagar',PayablesPage(payables));w.add_page('receivables','Contas a Receber',ReceivablesPage(payables));w.add_page('agenda','Agenda Financeira',AgendaPage(agenda));w.add_page('people','Pessoas / Beneficiários',PeoplePage(PeopleService(connection)));w.add_page('classification','Categorias e Centros',ClassificationPage(connection,ClassificationService(connection)));w.add_page('budgets','Orçamentos',BudgetsPage(connection));w.add_page('banks','Bancos e Contas',BanksPage(connection));w.add_page('cards','Cartões',AdvancedCardsPage(connection));w.add_page('reconciliation','Conciliação',AdvancedReconciliationPage(connection));w.add_page('assets','Patrimônio',AssetsPage(connection));w.add_page('investments','Investimentos',InvestmentsPage(connection));w.add_page('documents','Documentos',AdvancedDocumentsPage(connection,documents));w.add_page('reports','Relatórios',AdvancedReportsPage(connection));w.add_page('history','Histórico',AuditHistoryPage(connection));w.add_page('backup','Backup',BackupPage(backup,restore,settings));w.add_page('settings','Configurações',SettingsPage(settings,auth));return w
 def _open_database():
     paths=AppPaths.from_environment();connection=Database(paths.database_file).connect();MigrationRunner().apply_all(connection);return paths,connection
+def _apply_initial_seed(paths:AppPaths,connection):
+    seed_path=paths.initial_seed_file
+    if not seed_path.exists():return None
+    manifest=load_manifest(seed_path);result=InitialDataSeedService(connection).apply(manifest)
+    try:seed_path.unlink()
+    except OSError:pass
+    return result
 def _run_automatic_backup(paths,connection):
     ss=SettingsService(paths.config_dir/'config.json');s=ss.load()
     if not s.auto_backup_enabled or not s.backup_dir:return
@@ -41,9 +50,15 @@ def _run_automatic_backup(paths,connection):
     BackupService(connection,paths.database_file,paths.documents_dir,paths.config_dir/'config.json').create(s.backup_dir,'AUTO')
 def main(argv:list[str]|None=None)->int:
     args=list(sys.argv[1:] if argv is None else argv);paths,connection=_open_database();health=DatabaseHealth.check(connection)
-    if '--smoke-test' in args:connection.close();return 0 if health.ok else 2
+    if not health.ok:
+        if '--smoke-test' in args:connection.close();return 2
+        app=QApplication.instance() or QApplication([sys.argv[0],*args]);QMessageBox.critical(None,'Financeiro Pessoal do Dr.',health.message);connection.close();return 2
+    try:_apply_initial_seed(paths,connection)
+    except InitialSeedError as exc:
+        if '--smoke-test' in args:connection.close();return 3
+        app=QApplication.instance() or QApplication([sys.argv[0],*args]);QMessageBox.critical(None,'Financeiro Pessoal do Dr.',str(exc));connection.close();return 3
+    if '--smoke-test' in args:connection.close();return 0
     app=QApplication.instance() or QApplication([sys.argv[0],*args])
-    if not health.ok:QMessageBox.critical(None,'Financeiro Pessoal do Dr.',health.message);connection.close();return 2
     auth=AuthService(connection);login=LoginDialog(auth,setup_mode=not auth.has_password())
     if login.exec()!=QDialog.Accepted:connection.close();return 0
     try:_run_automatic_backup(paths,connection)
