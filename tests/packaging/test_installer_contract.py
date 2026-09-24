@@ -6,5 +6,6 @@ def test_installer_accepts_external_private_seed():
     assert "FinanceiroPessoalDr.initial-seed.json" in text
     assert "Flags: external" in text
     assert "skipifsourcedoesntexist" in text
+    assert "uninsneveruninstall" not in text
     assert "{localappdata}\\FinanceiroPessoalDr" in text
     assert 'DestName: "initial-seed.json"' in text
