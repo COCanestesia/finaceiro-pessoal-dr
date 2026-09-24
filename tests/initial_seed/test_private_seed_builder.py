@@ -1,11 +1,20 @@
 from datetime import date
 from decimal import Decimal
+import importlib.util
 from pathlib import Path
 
 from openpyxl import Workbook
 
 from financeiro_dr.initial_seed.loader import load_manifest
-from tools.build_private_seed import build_seed
+
+
+def _load_builder():
+    path = Path("tools/build_private_seed.py")
+    spec = importlib.util.spec_from_file_location("financeiro_private_seed_builder", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.build_seed
 
 
 def _write_fixture(path: Path) -> None:
@@ -53,6 +62,7 @@ def test_build_seed_converts_excel_to_valid_manifest(tmp_path):
     output = tmp_path / "fixture.initial-seed.json"
     _write_fixture(source)
 
+    build_seed = _load_builder()
     payload = build_seed(
         source,
         output,
