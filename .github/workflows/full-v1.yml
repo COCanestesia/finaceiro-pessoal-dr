@@ -66,6 +66,61 @@ jobs:
           }
           & $iscc "packaging\installer.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test optional private seed sidecar
+        shell: pwsh
+        run: |
+          $setupDir = ".\dist\installer"
+          $seedSidecar = Join-Path $setupDir "FinanceiroPessoalDr.initial-seed.json"
+          $seed = @{
+            schema_version = 1
+            seed_id = "ci-synthetic-v1"
+            source_label = "ci-fixture"
+            source_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+            expected = @{
+              record_count = 1
+              income_count = 0
+              expense_count = 1
+              income_cents = 0
+              expense_cents = 1234
+            }
+            records = @(
+              @{
+                source_row = 2
+                holder = "PESSOA CI"
+                date = "2026-01-02"
+                description = "Despesa CI seed"
+                payment_method = "TRANSFERÊNCIA"
+                amount_cents = 1234
+                category = "MORADIA"
+                raw_type = "MENSAL RECORRENTE"
+                classification = "DESPESA"
+                warning = $null
+              }
+            )
+          } | ConvertTo-Json -Depth 6
+          Set-Content -LiteralPath $seedSidecar -Value $seed -Encoding utf8NoBOM
+
+          $env:LOCALAPPDATA = "$env:RUNNER_TEMP\financeiro-seed-local"
+          $env:APPDATA = "$env:RUNNER_TEMP\financeiro-seed-roaming"
+          $seedTargetDir = Join-Path $env:LOCALAPPDATA "FinanceiroPessoalDr"
+          $seedTarget = Join-Path $seedTargetDir "initial-seed.json"
+          Remove-Item -Recurse -Force $seedTargetDir -ErrorAction SilentlyContinue
+
+          $installDir = Join-Path $env:RUNNER_TEMP "financeiro-seed-install"
+          Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+          & ".\dist\installer\FinanceiroPessoalDr-Setup.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$installDir"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path $seedTarget)) { throw "O instalador não copiou o seed externo." }
+
+          $installedExe = Join-Path $installDir "FinanceiroPessoalDr.exe"
+          & $installedExe --smoke-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path $seedTarget) { throw "O aplicativo não consumiu o seed após a carga." }
+
+          $db = Join-Path $seedTargetDir "financeiro.db"
+          python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); assert c.execute("select count(*) from initial_seed_batch where seed_id=''ci-synthetic-v1''").fetchone()[0] == 1; assert c.execute("select count(*) from financial_entry where description=''Despesa CI seed''").fetchone()[0] == 1; c.close()' $db
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item -Force $seedSidecar
       - name: Create portable zip
         shell: pwsh
         run: Compress-Archive -Path ".\dist\FinanceiroPessoalDr\*" -DestinationPath ".\dist\FinanceiroPessoalDr-Portable.zip" -Force
