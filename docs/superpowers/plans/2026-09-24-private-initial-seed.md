@@ -61,8 +61,6 @@ def test_initial_seed_tables_are_created(tmp_path):
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run:
-
 ```bash
 pytest tests/database/test_migrations.py::test_initial_seed_tables_are_created -v
 ```
@@ -189,7 +187,7 @@ Expected: import/module failure because initial seed module does not exist.
 
 - [ ] **Step 3: Implement manifest models and strict loader**
 
-`models.py` must define frozen dataclasses for manifest/record/expected totals and `SeedApplyResult(inserted, reused, warnings)`. `loader.py` must parse UTF-8 JSON, enforce `schema_version == 1`, non-empty `seed_id`, SHA-256 format, unique positive `source_row`, known classifications (`RECEITA`, `DESPESA` after trim/uppercase), ISO date and non-negative integer cents. Before returning, recompute record/income/expense counts and totals and compare with the `expected` block; mismatch raises `InitialSeedError`.
+`models.py` defines frozen dataclasses for manifest/record/expected totals and `SeedApplyResult(inserted, reused, warnings)`. `loader.py` parses UTF-8 JSON, enforces `schema_version == 1`, non-empty `seed_id`, SHA-256 format, unique positive `source_row`, known classifications (`RECEITA`, `DESPESA` after trim/uppercase), ISO date and non-negative integer cents. Before returning, it recomputes record/income/expense counts and totals and compares them with `expected`; mismatch raises `InitialSeedError`.
 
 - [ ] **Step 4: Run loader tests and verify GREEN**
 
@@ -229,15 +227,16 @@ Expected: FAIL because service is missing.
 
 Implementation rules:
 
-1. Return no-op when `initial_seed_batch.seed_id` exists.
-2. Use `BEGIN IMMEDIATE` only when not already in a transaction; otherwise use a SAVEPOINT so callers/tests are safe.
-3. Resolve/create `person` by trimmed case-insensitive exact name.
-4. Resolve/create category after explicit normalizer (`strip`, collapse spaces, uppercase comparison, explicit aliases).
-5. Build exact-match query using date, normalized description, amount, entry type, beneficiary id and normalized payment method; reuse only when exactly one candidate exists.
-6. Otherwise insert directly with `FinancialRepository.insert(CreateEntry(...))` using `allow_duplicate=True` semantics at seed level without calling user-facing duplicate guard.
-7. Insert `initial_seed_record` for every source row.
-8. Validate applied record count against manifest expected count before inserting `initial_seed_batch`.
-9. Commit/release only on success; rollback/rollback-to-savepoint on any exception and raise `InitialSeedError`.
+1. Return no-op when `initial_seed_batch.seed_id` already exists.
+2. Use `BEGIN IMMEDIATE` only when not already in a transaction; otherwise use one SAVEPOINT.
+3. Insert `initial_seed_batch` **inside that transaction before any `initial_seed_record`**, with `expected_count=manifest.expected.record_count`, `applied_count=0`, `warning_count=0`. This satisfies the FK and is safe because rollback removes the batch too.
+4. Resolve/create `person` by trimmed case-insensitive exact name.
+5. Resolve/create category after explicit normalizer (`strip`, collapse spaces, uppercase comparison, explicit aliases).
+6. Find candidate rows by stable DB fields (date, amount, entry type, beneficiary); perform normalized description/payment comparison in Python; reuse only when exactly one candidate remains.
+7. Otherwise insert directly with `FinancialRepository.insert(CreateEntry(...))`, bypassing the user-facing duplicate guard while preserving the seed row as a legitimate historical record.
+8. Insert `initial_seed_record` for every source row, including deterministic record hash and optional warning.
+9. Validate processed count against manifest expected count, then `UPDATE initial_seed_batch SET applied_count=?, warning_count=?`.
+10. Commit/release only on success. On any exception, rollback/rollback-to-savepoint so neither batch, provenance nor new financial rows survive, then raise `InitialSeedError`.
 
 - [ ] **Step 8: Add rollback and duplicate-safety tests**
 
@@ -246,7 +245,7 @@ Add tests proving:
 - a manual unrelated entry remains untouched;
 - one exact candidate is marked `REUSED_EXISTING`;
 - two exact candidates cause a fresh seed insertion instead of collapsing them;
-- forced invalid record midway leaves no batch and no seed records/entries.
+- forced exception after the batch placeholder and at least one row leaves no batch, no seed records and no seed-created financial entries.
 
 - [ ] **Step 9: Run full initial-seed tests and suite**
 
@@ -279,14 +278,14 @@ git commit -m "feat: apply private initial seed transactionally"
 
 - [ ] **Step 1: Write bootstrap RED tests**
 
-Tests must set temporary `LOCALAPPDATA`/`APPDATA` and verify:
+Tests set temporary `LOCALAPPDATA`/`APPDATA` and verify:
 
 ```python
 paths = AppPaths.from_environment()
 assert paths.initial_seed_file == paths.data_dir / "initial-seed.json"
 ```
 
-Then create a synthetic valid seed at that path, call a new helper `_apply_initial_seed(paths, connection)`, and assert the batch exists. A second call must not duplicate. With no file, helper returns cleanly.
+Then create a synthetic valid seed at that path, call `_apply_initial_seed(paths, connection)`, and assert the batch exists. A second call must not duplicate. With no file, helper returns `None`.
 
 - [ ] **Step 2: Run bootstrap tests and verify RED**
 
@@ -314,9 +313,20 @@ def _apply_initial_seed(paths, connection):
     return result
 ```
 
-Call this after migrations + DB health validation and before login/setup password. For normal GUI startup, seed errors show a critical message and exit without opening the app. For `--smoke-test`, return non-zero instead of requiring GUI interaction.
+The main flow is:
 
-- [ ] **Step 4: Verify bootstrap GREEN and regression suite**
+1. open DB and apply migrations;
+2. check DB health;
+3. attempt seed before login;
+4. for `--smoke-test`, return `0` only after successful/no-op seed processing;
+5. for normal startup, if seed fails, create/reuse `QApplication`, show one critical dialog and exit without showing login/window;
+6. otherwise continue to login/password setup.
+
+- [ ] **Step 4: Verify bootstrap GREEN and error behavior**
+
+Add test with malformed seed proving `_apply_initial_seed` raises and database has no seed batch. Keep GUI dialog behavior outside the unit helper; smoke path must return non-zero without requiring an interactive dialog.
+
+Run:
 
 ```bash
 pytest tests/integration/test_initial_seed_bootstrap.py -v
@@ -338,17 +348,19 @@ git commit -m "feat: bootstrap private seed before login"
 ### Task 4: Gerador local do Excel e bloqueios de privacidade
 
 **Files:**
+- Create: `tools/__init__.py`
 - Create: `tools/build_private_seed.py`
 - Modify: `.gitignore`
 - Create: `tests/initial_seed/test_private_seed_builder.py`
 
 **Interfaces:**
 - Produces CLI: `python tools/build_private_seed.py INPUT OUTPUT --seed-id ID --sheet Entrada_dados`.
+- Produces function `build_seed(input_path: Path, output_path: Path, seed_id: str, sheet_name: str) -> dict` used by tests.
 - Output compatible with `load_manifest()` from Task 2.
 
 - [ ] **Step 1: Write generator RED test**
 
-No test may use the private workbook. Build a synthetic workbook in `tmp_path` using openpyxl with headers `TITULAR, DATA, MÊS, DESCRIÇÃO, CONTA, VALOR, CATEGORIA, TIPO DE DESPESA, CLASSIFICAÇÃO`, then run the builder function and assert:
+No test may use the private workbook. Build a synthetic workbook in `tmp_path` using openpyxl with headers `TITULAR, DATA, MÊS, DESCRIÇÃO, CONTA, VALOR, CATEGORIA, TIPO DE DESPESA, CLASSIFICAÇÃO`, then call `build_seed` and assert:
 
 - Decimal `12.34` becomes `1234` cents;
 - classification with trailing spaces becomes `DESPESA`;
@@ -361,11 +373,9 @@ No test may use the private workbook. Build a synthetic workbook in `tmp_path` u
 pytest tests/initial_seed/test_private_seed_builder.py -v
 ```
 
-Expected: builder module missing.
+Expected: builder module/function missing.
 
 - [ ] **Step 3: Implement builder**
-
-Implementation requirements:
 
 ```python
 REQUIRED_HEADERS = (
@@ -374,7 +384,7 @@ REQUIRED_HEADERS = (
 )
 ```
 
-Use `openpyxl.load_workbook(input_path, data_only=True, read_only=True)`. Use `Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)` then multiply by 100 and convert to int. Compute source SHA-256 by streaming file bytes. Compute expected counts/totals from generated records. Write JSON with `ensure_ascii=False`, indent 2, UTF-8.
+Use `openpyxl.load_workbook(input_path, data_only=True, read_only=True)`. Use `Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)` then multiply by 100 and convert to int. Compute source SHA-256 by streaming file bytes. Compute expected counts/totals from generated records. Write JSON with `ensure_ascii=False`, indent 2, UTF-8. Reject a missing worksheet or missing required headers with a clear `ValueError` before writing output.
 
 - [ ] **Step 4: Add privacy ignore rules**
 
@@ -387,7 +397,7 @@ private-release/
 Dashboard*.xlsm
 ```
 
-Also add a test that reads `.gitignore` and asserts the first three generic rules exist; the workbook-name rule is defense-in-depth for this project.
+Add a test that reads `.gitignore` and asserts the first three generic rules exist; the workbook-name rule is defense-in-depth for this project.
 
 - [ ] **Step 5: Run generator tests and full suite**
 
@@ -401,7 +411,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/build_private_seed.py .gitignore tests/initial_seed/test_private_seed_builder.py
+git add tools/__init__.py tools/build_private_seed.py .gitignore tests/initial_seed/test_private_seed_builder.py
 git commit -m "feat: add private Excel seed builder"
 ```
 
@@ -420,12 +430,15 @@ git commit -m "feat: add private Excel seed builder"
 
 - [ ] **Step 1: Write installer contract RED test**
 
-Create a text-level contract test that loads `packaging/installer.iss` and requires:
-
 ```python
-assert 'FinanceiroPessoalDr.initial-seed.json' in text
-assert 'Flags: external' in text
-assert '{localappdata}\\FinanceiroPessoalDr' in text
+from pathlib import Path
+
+
+def test_installer_accepts_external_private_seed():
+    text = Path("packaging/installer.iss").read_text(encoding="utf-8")
+    assert 'FinanceiroPessoalDr.initial-seed.json' in text
+    assert 'Flags: external' in text
+    assert '{localappdata}\\FinanceiroPessoalDr' in text
 ```
 
 - [ ] **Step 2: Run and verify RED**
@@ -438,28 +451,37 @@ Expected: FAIL because installer has no external seed rule.
 
 - [ ] **Step 3: Add optional external file rule to Inno Setup**
 
-Add under `[Files]`:
+Under `[Files]` add:
 
 ```ini
 Source: "{src}\FinanceiroPessoalDr.initial-seed.json"; DestDir: "{localappdata}\FinanceiroPessoalDr"; DestName: "initial-seed.json"; Flags: external skipifsourcedoesntexist ignoreversion
 ```
 
-This must not reference any repository seed path.
+The source is runtime `{src}` (folder containing Setup), not a repository path, so the private file is never compiled into the public installer.
 
 - [ ] **Step 4: Extend Windows CI with synthetic external-seed install check**
 
-After installer build, create a synthetic seed JSON next to `Setup.exe`, set temporary `LOCALAPPDATA`/`APPDATA`, run installer silently, then verify the copied seed exists. Run installed executable with `--smoke-test`, then inspect the temporary SQLite with Python and assert `initial_seed_batch` has one synthetic batch and expected synthetic entries. Delete synthetic seed after the test.
+After installer build:
 
-The workflow must continue uploading only `Setup.exe` and portable ZIP, never the synthetic seed file.
+1. write a two-record synthetic manifest next to `dist/installer/FinanceiroPessoalDr-Setup.exe` as `FinanceiroPessoalDr.initial-seed.json`;
+2. point `LOCALAPPDATA` and `APPDATA` at fresh runner temp directories;
+3. run Setup with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`;
+4. assert `%LOCALAPPDATA%\FinanceiroPessoalDr\initial-seed.json` was copied;
+5. run the installed EXE with `--smoke-test`;
+6. query `%LOCALAPPDATA%\FinanceiroPessoalDr\financeiro.db` using Python `sqlite3` and assert the synthetic batch/entries exist;
+7. assert the seed file was removed by successful bootstrap or, if deletion was deliberately skipped by platform behavior, that rerunning `--smoke-test` does not change counts;
+8. remove the synthetic file from `dist/installer` before artifact upload.
 
-- [ ] **Step 5: Run packaging contract locally and push for CI**
+The workflow upload path remains only Setup + portable ZIP.
+
+- [ ] **Step 5: Run packaging contract and full suite**
 
 ```bash
 pytest tests/packaging/test_installer_contract.py -v
 pytest -q
 ```
 
-Expected: PASS. Then wait for Linux test + Windows build/install/smoke jobs to complete successfully.
+Expected: PASS, then GitHub Actions Linux + Windows jobs must pass from the same final commit.
 
 - [ ] **Step 6: Commit**
 
@@ -473,7 +495,7 @@ git commit -m "feat: support optional private seed beside installer"
 ### Task 6: Gerar e validar o seed real fora do GitHub
 
 **Files:**
-- Private input: user-provided Excel file, never commit.
+- Private input: workbook supplied by user, never commit.
 - Private output: `/mnt/data/FinanceiroPessoalDr.initial-seed.json`, never commit.
 - Private report: `/mnt/data/FinanceiroPessoalDr-seed-validation.txt`, never commit.
 
@@ -481,17 +503,19 @@ git commit -m "feat: support optional private seed beside installer"
 - Consumes `tools/build_private_seed.py` from Task 4.
 - Produces the actual private seed consumed by the installer/app.
 
-- [ ] **Step 1: Run the builder against the uploaded workbook**
+- [ ] **Step 1: Run the builder against the mounted private workbook**
 
-Use a stable seed id that includes the source date/version but no private person name, for example:
+Resolve the mounted input path at execution time, then run:
 
 ```bash
-python tools/build_private_seed.py "/mnt/data/Dashboard (ATUALIZADO).xlsm" "/mnt/data/FinanceiroPessoalDr.initial-seed.json" --seed-id "financeiro-historico-2026-09-v1"
+python tools/build_private_seed.py "<private-input.xlsm>" "/mnt/data/FinanceiroPessoalDr.initial-seed.json" --seed-id "financeiro-historico-2026-09-v1"
 ```
+
+The real input path and seed content must never be added to Git.
 
 - [ ] **Step 2: Validate the real seed without printing private rows**
 
-Run a validation script that loads the manifest and reports only:
+Load the manifest and report only:
 
 - schema valid;
 - record count matches manifest;
@@ -502,25 +526,19 @@ Run a validation script that loads the manifest and reports only:
 - warning count;
 - source SHA-256 matches manifest.
 
-Do not print holder names, descriptions, values per row, or the seed content into logs/chat.
+Do not print holder names, descriptions, values per row, or seed content into logs/chat.
 
-- [ ] **Step 3: Apply the real seed to a throwaway SQLite copy**
+- [ ] **Step 3: Apply the real seed to a throwaway SQLite**
 
-Create a temporary SQLite, apply all migrations, run `InitialDataSeedService.apply(manifest)`, then compare database aggregate invariants to the private manifest. Run apply a second time and assert no count/totals change.
+Create temporary SQLite, run every migration, apply `InitialDataSeedService.apply(manifest)`, then compare DB aggregate invariants to the private manifest. Apply a second time and assert counts/totals are unchanged.
 
-- [ ] **Step 4: Save a private validation report**
+- [ ] **Step 4: Save private validation report**
 
-Write only high-level PASS/FAIL and aggregate consistency to `/mnt/data/FinanceiroPessoalDr-seed-validation.txt`.
+Write only PASS/FAIL and aggregate consistency to `/mnt/data/FinanceiroPessoalDr-seed-validation.txt`.
 
-- [ ] **Step 5: Never commit private outputs**
+- [ ] **Step 5: Confirm private files are outside Git**
 
-Before any Git operation, confirm:
-
-```bash
-git status --short
-```
-
-must show neither `FinanceiroPessoalDr.initial-seed.json` nor the private workbook.
+Before any subsequent repository mutation, verify Git status in the execution workspace contains neither private workbook nor `FinanceiroPessoalDr.initial-seed.json`.
 
 ---
 
@@ -532,7 +550,7 @@ must show neither `FinanceiroPessoalDr.initial-seed.json` nor the private workbo
 - Output: `/mnt/data/FinanceiroPessoalDr-Privado-Com-Dados.zip`.
 
 **Interfaces:**
-- Package root must contain exactly the public setup executable, private seed, and a short `LEIA-ME.txt` instructing the user to extract both files into the same folder before running Setup.
+- Package root contains exactly the public setup executable, private seed, and `LEIA-ME.txt`.
 
 - [ ] **Step 1: Verify public CI from the final commit**
 
@@ -546,13 +564,13 @@ Require fresh success for:
 - synthetic external-seed installer/app smoke test;
 - public artifact upload.
 
-- [ ] **Step 2: Download the installer artifact from that exact workflow run**
+- [ ] **Step 2: Download installer artifact from that exact workflow run**
 
-Do not reuse an installer from an earlier commit.
+Do not reuse installer from an earlier commit.
 
 - [ ] **Step 3: Create private package outside GitHub**
 
-ZIP contents:
+ZIP root:
 
 ```text
 FinanceiroPessoalDr-Setup.exe
@@ -560,24 +578,24 @@ FinanceiroPessoalDr.initial-seed.json
 LEIA-ME.txt
 ```
 
-`LEIA-ME.txt` says: extract the ZIP, keep the two files together, execute `FinanceiroPessoalDr-Setup.exe`, and do not send/share the JSON because it contains private financial history.
+`LEIA-ME.txt` instructs: extract the ZIP, keep Setup and JSON together, execute Setup, and do not send/share the JSON because it contains private financial history.
 
 - [ ] **Step 4: Verify ZIP contents**
 
-Assert there are exactly three root files and that the seed filename matches the installer contract.
+Assert exactly three root files and exact seed filename expected by installer.
 
 - [ ] **Step 5: Final regression and privacy review**
 
-Run `pytest -q` on the final public branch and inspect the branch diff to confirm no private seed/workbook/content was committed. Search repository paths/text for `initial-seed.json` and verify all hits are generic code/docs/tests only, never real payload.
+Run `pytest -q` on the final public branch and inspect the branch diff to confirm no real seed/workbook/content was committed. Search repository text/paths for `initial-seed.json` and verify hits are generic code/docs/tests only, never payload data.
 
-- [ ] **Step 6: Deliver private artifacts to the user**
+- [ ] **Step 6: Deliver private artifacts**
 
-Provide links to:
+Provide user links to:
 
 - `FinanceiroPessoalDr-Privado-Com-Dados.zip` (recommended);
-- `FinanceiroPessoalDr-seed-validation.txt` (validation summary).
+- `FinanceiroPessoalDr-seed-validation.txt`.
 
-Do not upload the private seed separately unless the user explicitly asks for it.
+Do not expose/upload the private JSON by itself unless user explicitly asks.
 
 ---
 
