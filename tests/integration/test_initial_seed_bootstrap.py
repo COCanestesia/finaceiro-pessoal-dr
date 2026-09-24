@@ -1,9 +1,12 @@
 import json
 
+import pytest
+
 from financeiro_dr.app_paths import AppPaths
 from financeiro_dr.database.connection import Database
 from financeiro_dr.database.migrations import MigrationRunner
-from financeiro_dr.main import _apply_initial_seed
+from financeiro_dr.initial_seed.loader import InitialSeedError
+from financeiro_dr.main import _apply_initial_seed, main
 
 
 def _write_seed(path):
@@ -78,3 +81,28 @@ def test_apply_initial_seed_is_noop_when_file_is_absent(tmp_path, monkeypatch):
         assert con.execute("SELECT COUNT(*) FROM financial_entry").fetchone()[0] == 0
     finally:
         con.close()
+
+
+def test_malformed_seed_raises_without_batch_or_partial_entries(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    paths = AppPaths.from_environment()
+    con = Database(paths.database_file).connect()
+    try:
+        MigrationRunner().apply_all(con)
+        paths.initial_seed_file.write_text('{"schema_version":99}', encoding="utf-8")
+        with pytest.raises(InitialSeedError):
+            _apply_initial_seed(paths, con)
+        assert paths.initial_seed_file.exists()
+        assert con.execute("SELECT COUNT(*) FROM financial_entry").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM initial_seed_batch").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
+def test_smoke_test_returns_nonzero_for_invalid_seed_without_gui(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    paths = AppPaths.from_environment()
+    paths.initial_seed_file.write_text('{"schema_version":99}', encoding="utf-8")
+    assert main(["--smoke-test"]) == 3
