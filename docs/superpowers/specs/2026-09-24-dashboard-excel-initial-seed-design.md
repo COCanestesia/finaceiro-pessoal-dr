@@ -98,9 +98,9 @@ Normalização para chave de comparação:
 - trim de espaços
 - compactação de espaços repetidos
 - comparação sem diferença de caixa
-- comparação tolerante a acentos para identificar somente variantes evidentes
+- aliases explícitos somente para variantes conhecidas da fonte
 
-A etiqueta canônica preserva acentuação correta já existente. Assim, `MORADIA ` é reunida com `MORADIA`, e `CARTAO DE CREDITO` com `CARTÃO DE CRÉDITO`.
+A etiqueta canônica preserva acentuação correta já existente. `MORADIA ` é reunida com `MORADIA` pelo trim; `CARTAO DE CREDITO` usa alias explícito para `CARTÃO DE CRÉDITO`. Não será aplicada fusão genérica sem acentos a qualquer categoria, evitando juntar categorias distintas por engano.
 
 Registros sem categoria continuam com `category_id = NULL`; não será inventada uma categoria financeira nova.
 
@@ -108,11 +108,11 @@ Registros sem categoria continuam com `category_id = NULL`; não será inventada
 
 O tipo original é preservado na proveniência e usado para classificar natureza da despesa:
 
-- `MENSAL RECORRENTE` e `ANUAL` → `expense_nature = FIXA`
-- variantes de `DESPESA DIÁRIA`, `INVESTIMENTO`, `APORTE HCT` e vazio → `expense_nature = VARIAVEL`
-- receitas → `expense_nature = NULL`
+- `MENSAL RECORRENTE` e `ANUAL` → `expense_nature = FIXA` e `is_recurring = 1`
+- variantes de `DESPESA DIÁRIA`, `INVESTIMENTO`, `APORTE HCT` e vazio → `expense_nature = VARIAVEL` e `is_recurring = 0`
+- receitas → `expense_nature = NULL` e `is_recurring = 0`
 
-`MENSAL RECORRENTE`/`ANUAL` podem ser marcadas como recorrentes para identificação visual, mas **nenhuma regra automática de recorrência futura será criada a partir do histórico**. Isso evita gerar novas cobranças com base em meses passados e criar duplicidades.
+Para registros históricos marcados como recorrentes, `recurrence_rule_id` permanece NULL. **Nenhuma regra automática de recorrência futura será criada a partir do histórico.** Isso evita gerar novas cobranças com base em meses passados e criar duplicidades.
 
 Os 50 registros cujo tipo bruto é `INVESTIMENTO` continuam respeitando `CLASSIFICAÇÃO = DESPESA` na carga inicial, para que os totais históricos do aplicativo conciliem com o Excel. A migração não reinterpreta contabilmente a fonte.
 
@@ -182,6 +182,10 @@ Para uma instalação já existente sem o marcador de seed, o serviço preserva 
 
 Nenhum lançamento do usuário é apagado ou sobrescrito pela carga inicial.
 
+### Auditoria
+
+A carga histórica não criará 2.114 eventos individuais `CREATE` em `audit_log`, porque esses registros já existiam antes do aplicativo e não representam ações do operador. A origem de cada linha fica registrada em `initial_seed_record`. Qualquer alteração posterior feita pelo usuário em um lançamento importado segue normalmente para `audit_log`.
+
 ## 6. Fluxo de inicialização
 
 1. abrir SQLite local
@@ -234,7 +238,7 @@ A carga inteira roda sob uma transação SQLite única.
 
 Erros de estrutura do payload, classificação desconhecida, data inválida ou falha de banco cancelam a transação inteira. O erro deve informar que a base inicial não foi carregada e que nenhuma alteração parcial foi mantida.
 
-Inconsistências conhecidas e toleráveis da planilha (espaços, variantes de acento e valor ausente) são normalizadas/registradas como avisos e não interrompem a carga.
+Inconsistências conhecidas e toleráveis da planilha (espaços, aliases previstos e valor ausente) são normalizadas/registradas como avisos e não interrompem a carga.
 
 ## 10. Testes obrigatórios
 
@@ -244,7 +248,7 @@ Inconsistências conhecidas e toleráveis da planilha (espaços, variantes de ac
 - conversão decimal → centavos
 - trim de `DESPESA ` → `DESPESA`
 - `DESPESA DIARIA ` → natureza VARIAVEL
-- `MENSAL RECORRENTE`/`ANUAL` → natureza FIXA
+- `MENSAL RECORRENTE`/`ANUAL` → natureza FIXA + recorrente sem regra futura
 - classificação vence tipo bruto incoerente
 - linha sem valor → R$ 0,00 + aviso
 
