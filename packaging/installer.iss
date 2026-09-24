@@ -22,7 +22,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
 Source: "..\dist\FinanceiroPessoalDr\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{src}\FinanceiroPessoalDr.initial-seed.json"; DestDir: "{localappdata}\FinanceiroPessoalDr"; DestName: "initial-seed.json"; Flags: external skipifsourcedoesntexist uninsneveruninstall
+Source: "{src}\FinanceiroPessoalDr.initial-seed.json"; DestDir: "{localappdata}\FinanceiroPessoalDr"; DestName: "initial-seed.json"; Flags: external skipifsourcedoesntexist
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
