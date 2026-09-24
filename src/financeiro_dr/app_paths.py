@@ -11,6 +11,10 @@ class AppPaths:
     documents_dir: Path
     database_file: Path
 
+    @property
+    def initial_seed_file(self) -> Path:
+        return self.data_dir / "initial-seed.json"
+
     @classmethod
     def from_environment(cls) -> "AppPaths":
         local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
