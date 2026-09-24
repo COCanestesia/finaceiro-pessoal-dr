@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/complete-v1
+      - feat/private-initial-seed
       - main
   pull_request:
   workflow_dispatch:
