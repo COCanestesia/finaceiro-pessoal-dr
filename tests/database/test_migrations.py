@@ -50,3 +50,19 @@ def test_all_migrations_create_required_financial_columns(tmp_path):
         assert required <= columns
     finally:
         con.close()
+
+
+def test_initial_seed_tables_are_created(tmp_path):
+    con = Database(tmp_path / "f.db").connect()
+    try:
+        MigrationRunner().apply_all(con)
+        tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "initial_seed_batch" in tables
+        assert "initial_seed_record" in tables
+    finally:
+        con.close()
