@@ -1,295 +1,222 @@
-# Design — carga inicial do Dashboard Excel no Financeiro Pessoal do Dr.
+# Design — carga inicial privada no Financeiro Pessoal do Dr.
 
 Data: 2026-09-24
 
 ## 1. Objetivo
 
-A nova instalação/atualização do Financeiro Pessoal do Dr. deve abrir já com o histórico financeiro fornecido em `Dashboard (ATUALIZADO).xlsm`, sem exigir que o usuário importe a planilha manualmente. Depois da carga, o SQLite local continua sendo a fonte oficial do aplicativo; o Excel não é necessário para o uso diário.
+A instalação/atualização do Financeiro Pessoal do Dr. deve conseguir abrir já com o histórico financeiro fornecido em uma planilha privada, sem exigir importação manual no uso diário. Depois da carga, o SQLite local continua sendo a fonte oficial do aplicativo.
 
-A carga deve funcionar também em uma instalação existente: se a base inicial ainda não foi aplicada, ela é carregada uma única vez; se já foi aplicada, a inicialização é um no-op e não duplica dados.
+O repositório deste projeto é público. Portanto, **nenhum dado pessoal, descrição financeira, nome, valor, total, hash do arquivo privado ou payload de carga pode ser commitado no GitHub**.
 
-## 2. Fonte analisada
+## 2. Fonte privada
 
-Arquivo: `Dashboard (ATUALIZADO).xlsm`
-SHA-256: `91725c31149d747a910a87c8a4d9c326fb850a5c478329bfac7289ffa6b815c5`
+A fonte é uma planilha Excel fornecida diretamente pelo usuário. A aba de entrada contém os campos necessários para criar lançamentos históricos: titular, data, descrição, forma de pagamento, valor, categoria, tipo e classificação.
 
-A aba fonte é `Entrada_dados`, intervalo `A1:I2115`, com 2.114 registros de dados e as colunas:
-
-- TITULAR
-- DATA
-- MÊS
-- DESCRIÇÃO
-- CONTA
-- VALOR
-- CATEGORIA
-- TIPO DE DESPESA
-- CLASSIFICAÇÃO
-
-Faixa de datas: 2026-01-02 a 2026-09-22.
-
-Distribuição por titular:
-
-- DR. UBIRAJARA: 1.769
-- DONA IARA: 271
-- LEONARDO: 74
-
-Classificação financeira normalizada:
-
-- DESPESA: 1.917 registros, total R$ 2.869.732,82
-- RECEITA: 197 registros, total R$ 755.855,27
-
-Formas de pagamento presentes:
-
-- TRANSFERÊNCIA BANCÁRIA: 2.009
-- ESPÉCIE: 105
-
-Foram detectadas pequenas inconsistências de origem que a migração deve tratar sem apagar informação: espaços finais em categoria/classificação/tipo; variantes como `CARTAO DE CREDITO` x `CARTÃO DE CRÉDITO`, `MORADIA ` x `MORADIA`, `DESPESA DIARIA ` x `DESPESA DIÁRIA`; 196 registros sem categoria; e um registro (`EMPRESTIMO MUTUO COC`) sem valor preenchido.
+A análise detalhada da fonte e seus invariantes reais permanecem fora do repositório público. Eles serão carregados no manifesto privado gerado localmente.
 
 ## 3. Abordagem aprovada
 
-Será usada uma **carga inicial embutida no aplicativo**, e não um SQLite pré-preenchido nem o Excel bruto dentro da pasta de trabalho do usuário.
+Será usado um **seed privado externo ao repositório**.
 
-Durante o desenvolvimento/build, a aba `Entrada_dados` é transformada em um recurso de seed versionado e mínimo, contendo apenas os campos necessários para o aplicativo e a proveniência da linha de origem. Dashboard, fórmulas, macros, tabelas dinâmicas e demais abas não entram no banco nem são necessárias em produção.
+O código público terá apenas:
 
-Na inicialização do aplicativo, depois das migrations do SQLite, um `InitialDataSeedService` verifica se esse seed já foi aplicado. Se não foi, aplica toda a carga dentro de uma única transação. Se qualquer registro falhar, ocorre rollback integral: o usuário nunca fica com uma carga parcial.
+- schema e validação do formato do seed;
+- serviço transacional de aplicação;
+- migration de proveniência/idempotência;
+- gerador local que transforma um Excel em seed;
+- suporte do instalador para copiar, se presente, um seed privado colocado ao lado do `Setup.exe`;
+- testes com dados sintéticos.
 
-## 4. Mapeamento Excel → aplicativo
+O arquivo real de seed será gerado fora do GitHub e entregue ao usuário junto do instalador em um pacote privado.
 
-### TITULAR
+## 4. Fluxo do instalador
 
-Cria/reutiliza `person` como Pessoa/Beneficiário, mantendo os nomes da origem:
+O pacote privado entregue ao usuário conterá:
 
-- DR. UBIRAJARA
-- DONA IARA
-- LEONARDO
+- `FinanceiroPessoalDr-Setup.exe`
+- `FinanceiroPessoalDr.initial-seed.json`
 
-Parentesco e apelido ficam vazios porque a planilha não informa esses dados.
+O instalador público permanece genérico. Se encontrar `FinanceiroPessoalDr.initial-seed.json` na mesma pasta do `Setup.exe`, ele o copia para `%LOCALAPPDATA%/FinanceiroPessoalDr/initial-seed.json`.
 
-### DATA
+Se o seed não estiver presente, a instalação continua normalmente e o aplicativo abre sem tentar importar dados privados.
 
-- `financial_entry.competence_date` = DATA
-- `financial_entry.settled_date` = DATA
-- `financial_entry.due_date` = NULL
+## 5. Fluxo de inicialização do aplicativo
 
-Não será inventado vencimento que não existe na fonte.
+1. abrir o SQLite local;
+2. aplicar migrations;
+3. validar saúde básica do banco;
+4. procurar `%LOCALAPPDATA%/FinanceiroPessoalDr/initial-seed.json`;
+5. se não existir, continuar normalmente;
+6. se existir, validar schema, versão, seed id e invariantes do manifesto;
+7. aplicar o seed em uma única transação SQLite;
+8. registrar batch e proveniência por linha;
+9. commit da transação somente se tudo for consistente;
+10. tentar remover o arquivo de seed após sucesso; falha ao remover não é fatal porque a idempotência impede reaplicação;
+11. continuar para criação/login da senha;
+12. backup automático continua depois do login.
 
-### DESCRIÇÃO
+Se a aplicação do seed falhar, ocorre rollback integral e o app informa que a base inicial não foi aplicada. Nenhuma carga parcial pode ser mantida.
 
-Vai integralmente para `financial_entry.description`, após remoção apenas de espaços externos desnecessários.
+## 6. Formato privado do seed
 
-### CONTA
+JSON UTF-8 com envelope versionado:
 
-Vai para `financial_entry.payment_method`.
+```json
+{
+  "schema_version": 1,
+  "seed_id": "identificador-unico-da-carga",
+  "source_label": "fonte privada",
+  "source_sha256": "hash-da-fonte",
+  "expected": {
+    "record_count": 3,
+    "income_count": 1,
+    "expense_count": 2,
+    "income_cents": 10000,
+    "expense_cents": 7500
+  },
+  "records": [
+    {
+      "source_row": 2,
+      "holder": "PESSOA EXEMPLO",
+      "date": "2026-01-02",
+      "description": "Lançamento sintético",
+      "payment_method": "TRANSFERÊNCIA",
+      "amount_cents": 5000,
+      "category": "MORADIA",
+      "raw_type": "MENSAL RECORRENTE",
+      "classification": "DESPESA",
+      "warning": null
+    }
+  ]
+}
+```
 
-`ESPÉCIE` e `TRANSFERÊNCIA BANCÁRIA` não serão cadastradas como contas bancárias, porque a coluna representa forma de pagamento, não uma instituição/conta identificável.
+Os valores acima são apenas fixture sintética de documentação e não representam a fonte privada.
 
-### VALOR
+## 7. Mapeamento para o SQLite
 
-Convertido para centavos inteiros usando arredondamento decimal de duas casas; não usar float binário para persistência.
+- titular → cria/reutiliza `person` e alimenta `beneficiary_id`;
+- data → `competence_date` e `settled_date`;
+- `due_date` fica nulo quando não existir na origem;
+- descrição → `description` com trim externo;
+- forma de pagamento → `payment_method`;
+- valor → `amount_cents` inteiro;
+- categoria → cria/reutiliza `category`, com normalização somente de variantes explicitamente suportadas;
+- classificação `DESPESA` → `entry_type=DESPESA`, `status=PAGO`;
+- classificação `RECEITA` → `entry_type=RECEITA`, `status=RECEBIDO`;
+- tipo mensal/anual → `expense_nature=FIXA`, `is_recurring=1`, sem criar `recurrence_rule_id`;
+- demais despesas → `expense_nature=VARIAVEL`, `is_recurring=0`;
+- receitas → `expense_nature=NULL`, `is_recurring=0`.
 
-O único registro sem VALOR será preservado com `amount_cents = 0` e um aviso de proveniência (`MISSING_AMOUNT`) para que o histórico não perca a linha existente no Excel.
+Não serão inferidos banco específico, cartão, centro de custo, subcategoria, patrimônio ou origem da receita quando a fonte não os fornecer.
 
-### CATEGORIA
+## 8. Proveniência e idempotência
 
-Categorias não vazias são criadas/reutilizadas em `category`.
-
-Normalização para chave de comparação:
-
-- trim de espaços
-- compactação de espaços repetidos
-- comparação sem diferença de caixa
-- aliases explícitos somente para variantes conhecidas da fonte
-
-A etiqueta canônica preserva acentuação correta já existente. `MORADIA ` é reunida com `MORADIA` pelo trim; `CARTAO DE CREDITO` usa alias explícito para `CARTÃO DE CRÉDITO`. Não será aplicada fusão genérica sem acentos a qualquer categoria, evitando juntar categorias distintas por engano.
-
-Registros sem categoria continuam com `category_id = NULL`; não será inventada uma categoria financeira nova.
-
-### TIPO DE DESPESA
-
-O tipo original é preservado na proveniência e usado para classificar natureza da despesa:
-
-- `MENSAL RECORRENTE` e `ANUAL` → `expense_nature = FIXA` e `is_recurring = 1`
-- variantes de `DESPESA DIÁRIA`, `INVESTIMENTO`, `APORTE HCT` e vazio → `expense_nature = VARIAVEL` e `is_recurring = 0`
-- receitas → `expense_nature = NULL` e `is_recurring = 0`
-
-Para registros históricos marcados como recorrentes, `recurrence_rule_id` permanece NULL. **Nenhuma regra automática de recorrência futura será criada a partir do histórico.** Isso evita gerar novas cobranças com base em meses passados e criar duplicidades.
-
-Os 50 registros cujo tipo bruto é `INVESTIMENTO` continuam respeitando `CLASSIFICAÇÃO = DESPESA` na carga inicial, para que os totais históricos do aplicativo conciliem com o Excel. A migração não reinterpreta contabilmente a fonte.
-
-### CLASSIFICAÇÃO
-
-É a regra principal para `entry_type`:
-
-- `DESPESA` (após trim/normalização) → `DESPESA`
-- `RECEITA` → `RECEITA`
-
-Todos os registros foram confirmados pelo usuário como já liquidados:
-
-- DESPESA → `status = PAGO`
-- RECEITA → `status = RECEBIDO`
-
-Mesmo quando `TIPO DE DESPESA` contiver texto incoerente com a classificação, `CLASSIFICAÇÃO` vence. Existem dois registros classificados como RECEITA cujo tipo bruto contém `DESPESA DIÁRIA`; eles permanecem RECEITA.
-
-### MÊS
-
-Não é importado como campo separado. O mês é derivado de DATA nos relatórios do aplicativo.
-
-### Campos sem origem suficiente
-
-Ficam nulos/sem vínculo na carga inicial:
-
-- subcategoria
-- centro de custo
-- conta bancária específica
-- cartão específico
-- patrimônio
-- origem da receita
-
-Isso evita inventar dados que o Excel não fornece.
-
-## 5. Proveniência, idempotência e segurança contra duplicidade
-
-Adicionar uma migration com duas tabelas isoladas do domínio financeiro:
+Nova migration cria:
 
 ### `initial_seed_batch`
 
-Registra:
-
-- `seed_id` (PK)
-- nome lógico da fonte
-- SHA-256 da fonte
-- quantidade esperada
-- quantidade inserida/reutilizada
-- quantidade de avisos
-- data/hora da aplicação
-
-Seed inicial: `dashboard-atualizado-2026-09-22-v1`.
+- `seed_id` TEXT PRIMARY KEY;
+- `source_label` TEXT;
+- `source_sha256` TEXT;
+- `expected_count` INTEGER;
+- `applied_count` INTEGER;
+- `warning_count` INTEGER;
+- `applied_at` TEXT.
 
 ### `initial_seed_record`
 
-Registra por linha:
+- `seed_id` TEXT;
+- `source_row` INTEGER;
+- `record_hash` TEXT;
+- `financial_entry_id` INTEGER;
+- `action` TEXT (`INSERTED` ou `REUSED_EXISTING`);
+- `warning_code` TEXT NULL;
+- PK composta `(seed_id, source_row)`.
 
-- `seed_id`
-- linha da aba fonte
-- hash determinístico dos campos relevantes
-- `financial_entry_id`
-- ação (`INSERTED` ou `REUSED_EXISTING`)
-- código de aviso opcional
+Se `initial_seed_batch.seed_id` já existir, a carga é um no-op.
 
-A existência de `initial_seed_batch.seed_id` torna a operação idempotente: abrir o sistema novamente ou instalar uma atualização não reaplica os 2.114 registros.
+Em banco existente, o serviço nunca apaga nem sobrescreve lançamento do usuário. Uma linha privada só pode reutilizar um lançamento existente quando houver exatamente uma correspondência inequívoca por data, descrição normalizada, valor, tipo, beneficiário e forma de pagamento. Caso contrário, insere nova linha e preserva multiplicidade legítima.
 
-Para uma instalação já existente sem o marcador de seed, o serviço preserva lançamentos já cadastrados. Antes de inserir uma linha, procura uma correspondência **exata** por data, descrição normalizada, valor, tipo, beneficiário e forma de pagamento. Somente quando houver exatamente uma correspondência inequívoca ela pode ser reutilizada; zero ou múltiplas correspondências levam à inserção do registro do seed, preservando multiplicidade legítima.
+A carga histórica não cria milhares de eventos `CREATE` no `audit_log`; sua proveniência fica em `initial_seed_record`. Edições futuras feitas pelo operador continuam sendo auditadas normalmente.
 
-Nenhum lançamento do usuário é apagado ou sobrescrito pela carga inicial.
+## 9. Geração local do seed
 
-### Auditoria
+Um script público `tools/build_private_seed.py` recebe:
 
-A carga histórica não criará 2.114 eventos individuais `CREATE` em `audit_log`, porque esses registros já existiam antes do aplicativo e não representam ações do operador. A origem de cada linha fica registrada em `initial_seed_record`. Qualquer alteração posterior feita pelo usuário em um lançamento importado segue normalmente para `audit_log`.
+```text
+python tools/build_private_seed.py <entrada.xlsm> <saida.json> --seed-id <id>
+```
 
-## 6. Fluxo de inicialização
+Ele:
 
-1. abrir SQLite local
-2. aplicar migrations
-3. validar saúde básica do banco
-4. aplicar `InitialDataSeedService.apply_if_needed()`
-5. se a carga falhar: rollback integral + mensagem crítica; não continuar com base parcialmente migrada
-6. continuar para criação/login da senha
-7. backup automático continua depois do login como já ocorre hoje
+- lê somente a aba de entrada configurada;
+- valida cabeçalhos obrigatórios;
+- converte valores com `Decimal`;
+- normaliza somente aliases definidos no código;
+- preserva linhas com valor ausente como zero e aviso quando essa regra estiver habilitada para a fonte;
+- calcula os invariantes e o hash da fonte;
+- grava o JSON privado fora do repositório.
 
-Uma instalação nova recebe a base histórica antes mesmo do primeiro uso. Uma instalação antiga recebe a base ao atualizar para a versão que contém o seed, desde que o seed ainda não tenha sido registrado.
+O `.gitignore` deve bloquear `*.initial-seed.json`, `private-seed/` e nomes equivalentes usados para payload privado.
 
-## 7. Recurso embutido
+## 10. Segurança
 
-O `.xlsm` não será necessário no computador do financeiro. O build contém um payload de seed mínimo e versionado, gerado a partir da aba `Entrada_dados`.
+- dados reais nunca entram no repositório;
+- CI usa somente fixtures sintéticas;
+- workflow público nunca recebe o seed real;
+- artefato público do GitHub Actions contém somente instalador genérico/portátil;
+- pacote privado final é montado fora do GitHub, juntando instalador validado + seed real;
+- o seed é copiado apenas para o computador local durante a instalação;
+- o SQLite local continua offline e oficial após a carga.
 
-O payload guarda somente:
-
-- source_row
-- titular
-- data
-- descrição
-- forma de pagamento
-- valor em centavos
-- categoria normalizada
-- tipo bruto
-- classificação
-- aviso de origem, quando existir
-
-O instalador não depende de Excel, Power BI, internet, Supabase ou macros para fazer a carga.
-
-## 8. Relatórios e conciliação após a carga
-
-Como os registros entram em `financial_entry`, eles passam a alimentar automaticamente as telas e relatórios existentes por período, pessoa, categoria, natureza e classificação.
-
-Critérios de conciliação da migração:
-
-- total de linhas após seed: 2.114 registros de origem contabilizados (inseridos ou reutilizados)
-- receitas históricas: 197 / R$ 755.855,27
-- despesas históricas: 1.917 / R$ 2.869.732,82
-- data mínima: 2026-01-02
-- data máxima: 2026-09-22
-- beneficiários da origem: 3
-
-Os valores acima serão usados como invariantes de teste da carga.
-
-## 9. Tratamento de erros
-
-A carga inteira roda sob uma transação SQLite única.
-
-Erros de estrutura do payload, classificação desconhecida, data inválida ou falha de banco cancelam a transação inteira. O erro deve informar que a base inicial não foi carregada e que nenhuma alteração parcial foi mantida.
-
-Inconsistências conhecidas e toleráveis da planilha (espaços, aliases previstos e valor ausente) são normalizadas/registradas como avisos e não interrompem a carga.
-
-## 10. Testes obrigatórios
+## 11. Testes obrigatórios
 
 ### Unidade
 
-- normalização de categorias e tipos
-- conversão decimal → centavos
-- trim de `DESPESA ` → `DESPESA`
-- `DESPESA DIARIA ` → natureza VARIAVEL
-- `MENSAL RECORRENTE`/`ANUAL` → natureza FIXA + recorrente sem regra futura
-- classificação vence tipo bruto incoerente
-- linha sem valor → R$ 0,00 + aviso
+- validação do envelope JSON;
+- rejeição de schema version desconhecida;
+- normalização de classificação/tipo/categoria;
+- conversão Decimal → centavos no gerador;
+- classificação vence tipo bruto incoerente;
+- valor ausente permitido gera zero + warning;
+- arquivo privado nunca faz parte dos package data públicos.
 
-### Integração — SQLite vazio
+### Integração com fixture sintética
 
-Após aplicar o seed:
+- seed novo cria pessoas, categorias e lançamentos esperados;
+- status de despesas/receitas já quitadas é correto;
+- totais do banco batem com o bloco `expected` do manifesto;
+- rodar duas vezes não duplica;
+- banco com lançamento manual não relacionado permanece intacto;
+- correspondência única pode ser `REUSED_EXISTING`;
+- múltiplas correspondências não são colapsadas;
+- erro no meio da aplicação faz rollback integral.
 
-- 2.114 registros contabilizados
-- 1.917 DESPESAS PAGO
-- 197 RECEITAS RECEBIDO
-- receitas somam 75.585.527 centavos
-- despesas somam 286.973.282 centavos
-- 3 pessoas da origem presentes
-- datas mínima/máxima corretas
-- nenhum registro parcialmente aplicado
+### Bootstrap
 
-### Idempotência
+- sem arquivo de seed: app continua normalmente;
+- com seed válido: seed é aplicado antes do login;
+- com seed inválido: app não continua com base parcialmente alterada;
+- após seed aplicado, reapresentar o mesmo arquivo não duplica.
 
-Executar o seed duas vezes mantém os mesmos totais e a mesma quantidade de registros.
+### Windows/instalador
 
-### Banco existente
+- suíte completa no Windows;
+- build PyInstaller;
+- smoke test do executável sem seed;
+- teste do comportamento de instalação/cópia com fixture sintética externa;
+- instalador público continua funcionando mesmo sem arquivo externo.
 
-Um lançamento manual não relacionado permanece intacto após a carga. Correspondência exata inequívoca pode ser vinculada como `REUSED_EXISTING`; múltiplas correspondências não são colapsadas.
+## 12. Fora de escopo
 
-### Falha transacional
+- publicar o seed real no GitHub;
+- embutir dados pessoais no executável público;
+- importar dashboards, macros ou fórmulas do Excel;
+- criar recorrências futuras a partir do histórico;
+- inferir campos que não existam na fonte;
+- manter dependência do Excel após a carga.
 
-Forçar erro durante a carga deve deixar zero registros do seed e nenhum `initial_seed_batch` aplicado.
+## 13. Resultado esperado
 
-### Build Windows
-
-O CI deve executar a suíte completa no Windows, criar o executável/instalador, executar o smoke test empacotado e validar também a presença/leitura do payload de seed no pacote final.
-
-## 11. Fora de escopo desta mudança
-
-- importar fórmulas, dashboard ou macros do Excel
-- substituir o Excel usado pelo Power BI
-- inventar bancos/cartões específicos a partir de `CONTA`
-- criar recorrências futuras automaticamente a partir do histórico
-- reclassificar os 50 registros históricos de INVESTIMENTO para o módulo de investimentos
-- inferir centro de custo, subcategoria ou origem de receita não informados na fonte
-
-## 12. Resultado esperado
-
-Ao instalar/atualizar a versão com esta mudança, o usuário abre o Financeiro Pessoal do Dr. e já encontra o histórico do Excel nas telas e relatórios. A planilha deixa de ser necessária para o aplicativo, o banco continua local/offline e o seed nunca é aplicado duas vezes na mesma base.
+O usuário recebe um pacote privado com o instalador e o arquivo de seed. Ao instalar e abrir o Financeiro Pessoal do Dr., os dados históricos entram automaticamente no SQLite antes do primeiro uso. O mesmo instalador público continua reutilizável para outras máquinas sem expor qualquer dado privado.
