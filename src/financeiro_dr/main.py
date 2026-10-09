@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QDialog, QLabel
 
@@ -14,6 +15,7 @@ from financeiro_dr.core.financeiro.scheduling import SchedulingService
 from financeiro_dr.core.financeiro.service import FinancialService
 from financeiro_dr.database.connection import Database
 from financeiro_dr.database.backup import automatic_daily_backup
+from financeiro_dr.database.restore import restore_backup_offline
 from financeiro_dr.database.migrations import MigrationRunner
 from financeiro_dr.security.auth_service import AuthService
 from financeiro_dr.ui.app_window import MainWindow
@@ -64,6 +66,13 @@ def _open_database():
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if '--restore-backup' in args:
+        index = args.index('--restore-backup')
+        if len(args) != index + 2:
+            raise ValueError('Informe o caminho do backup após --restore-backup.')
+        destination = AppPaths.from_environment().database_file
+        restore_backup_offline(Path(args[index + 1]), destination)
+        return 0
     _, connection = _open_database()
 
     if "--smoke-test" in args:
