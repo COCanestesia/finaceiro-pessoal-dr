@@ -8,6 +8,7 @@ import json
 import secrets
 import sqlite3
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -23,13 +24,19 @@ class SessionStore:
     def issue(self, user: dict) -> str:
         token = secrets.token_urlsafe(32)
         with self._lock:
-            self._tokens[token] = dict(user)
+            self._tokens[token] = (dict(user), time.monotonic() + 3600)
         return token
 
     def get(self, token: str) -> dict | None:
         with self._lock:
             value = self._tokens.get(token)
-            return dict(value) if value else None
+            if not value:
+                return None
+            user, expires_at = value
+            if time.monotonic() >= expires_at:
+                self._tokens.pop(token, None)
+                return None
+            return dict(user)
 
 
 def make_handler(db_path: Path, sessions: SessionStore):
