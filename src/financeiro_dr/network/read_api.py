@@ -121,3 +121,24 @@ def create_server(db_path: Path, host: str = "127.0.0.1", port: int = 8765):
     if host not in ("127.0.0.1", "localhost"):
         raise ValueError("Este protótipo deve usar somente loopback e túnel privado.")
     return ThreadingHTTPServer((host, port), make_handler(db_path, SessionStore()))
+
+
+def main(argv=None) -> int:
+    """Start local-only API for a private HTTPS reverse proxy."""
+    import argparse
+    from financeiro_dr.app_paths import AppPaths
+    parser = argparse.ArgumentParser(description="Servidor privado Financeiro Pessoal DR")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args(argv)
+    server = create_server(AppPaths.from_environment().database_file, port=args.port)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
