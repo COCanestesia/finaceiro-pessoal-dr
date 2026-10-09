@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QLabel,QComboBox,QPushButton,QFileDialog,QMessageBox,QTableWidget,QTableWidgetItem
 from financeiro_dr.core.financeiro.bank_import import import_bank_csv
+from financeiro_dr.core.financeiro.ofx_import import import_ofx
 
 
 class BankImportPage(QWidget):
@@ -52,9 +53,9 @@ class BankImportPage(QWidget):
         if account is None:
             QMessageBox.warning(self,"Importação","Cadastre uma conta bancária primeiro.")
             return
-        name,_=QFileDialog.getOpenFileName(self,"Escolher extrato","","CSV (*.csv)")
+        name,_=QFileDialog.getOpenFileName(self,"Escolher extrato","","Extratos (*.csv *.ofx)")
         if not name: return
-        try: result=import_bank_csv(self.connection,account,name)
+        try: result=import_ofx(self.connection,account,name) if name.lower().endswith('.ofx') else import_bank_csv(self.connection,account,name)
         except Exception as exc:
             QMessageBox.critical(self,"Erro ao importar",str(exc))
             return
