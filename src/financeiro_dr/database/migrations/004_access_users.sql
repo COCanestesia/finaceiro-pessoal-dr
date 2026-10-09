@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS access_user (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ display_name TEXT NOT NULL,
+ password_hash TEXT NOT NULL,
+ role TEXT NOT NULL CHECK(role IN ('admin','financeiro','consulta')),
+ active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
