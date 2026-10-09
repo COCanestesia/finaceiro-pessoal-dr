@@ -19,7 +19,8 @@ def test_login_rejects_wrong_password(qtbot,auth_service):
 def test_login_accepts_correct_password(qtbot,auth_service):
     dialog=LoginDialog(auth_service); qtbot.addWidget(dialog); dialog.password_input.setText("Senha Forte 123!"); qtbot.mouseClick(dialog.login_button,Qt.LeftButton); assert dialog.result()==QDialog.Accepted
 
-def test_first_use_setup_saves_password(qtbot,tmp_path):
+def test_first_use_setup_saves_password(qtbot,tmp_path,monkeypatch):
+    monkeypatch.setattr('financeiro_dr.ui.login_dialog.show_recovery_code', lambda *args: None)
     con=Database(tmp_path/"setup.db").connect(); MigrationRunner().apply_all(con); auth=AuthService(con); dialog=LoginDialog(auth,setup_mode=True); qtbot.addWidget(dialog)
     try:
         dialog.password_input.setText("Primeira Senha 123!"); dialog.confirm_input.setText("Primeira Senha 123!"); qtbot.mouseClick(dialog.login_button,Qt.LeftButton); assert dialog.result()==QDialog.Accepted; assert auth.authenticate("Primeira Senha 123!") is True
