@@ -27,6 +27,7 @@ from financeiro_dr.ui.pages.settings_page import SettingsPage
 from financeiro_dr.ui.pages.history_page import HistoryPage
 from financeiro_dr.ui.pages.bank_cards_page import BankCardsPage
 from financeiro_dr.ui.pages.bank_import_page import BankImportPage
+from financeiro_dr.ui.pages.reports_page import ReportsPage
 
 
 def build_window(connection) -> MainWindow:
@@ -43,6 +44,7 @@ def build_window(connection) -> MainWindow:
     window.add_page("agenda", "Agenda Financeira", AgendaPage(agenda))
     window.add_page("banks", "Bancos e Cartões", BankCardsPage(connection))
     window.add_page("statements", "Extratos", BankImportPage(connection))
+    window.add_page("reports", "Relatórios", ReportsPage(connection))
     window.add_page("history", "Histórico", HistoryPage(connection))
     window.add_page("settings", "Configurações", SettingsPage(connection))
     return window
