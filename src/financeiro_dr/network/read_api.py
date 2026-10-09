@@ -60,6 +60,9 @@ def make_handler(db_path: Path, sessions: SessionStore):
             return con
 
         def do_POST(self):
+            if urlsplit(self.path).path == "/v1/entries":
+                self._create_entry()
+                return
             if urlsplit(self.path).path != "/v1/session":
                 self._respond(404, {"error": "Não encontrado"})
                 return
@@ -80,6 +83,62 @@ def make_handler(db_path: Path, sessions: SessionStore):
                 self._respond(200, {"token": sessions.issue(user), "user": user})
             except (ValueError, KeyError, TypeError, json.JSONDecodeError):
                 self._respond(400, {"error": "Requisição inválida"})
+
+        def _create_entry(self):
+            header = self.headers.get("Authorization", "")
+            token = header[7:] if header.startswith("Bearer ") else ""
+            identity = sessions.get(token)
+            if not identity:
+                self._respond(401, {"error": "Autenticação necessária"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096:
+                    raise ValueError
+                payload = json.loads(self.rfile.read(length))
+                from datetime import date
+                day = date.fromisoformat(payload["competence_date"]).isoformat()
+                name = payload["description"].strip()
+                amount = payload["amount_cents"]
+                kind = payload["entry_type"]
+                status = payload["status"]
+                if not isinstance(name, str) or not 1 <= len(name) <= 300:
+                    raise ValueError
+                if type(amount) is not int or amount < 0 or amount > 10**12:
+                    raise ValueError
+                if kind not in ("RECEITA", "DESPESA") or status not in ("PENDENTE", "PAGO", "RECEBIDO"):
+                    raise ValueError
+                if (kind == "RECEITA" and status == "PAGO") or (kind == "DESPESA" and status == "RECEBIDO"):
+                    raise ValueError
+            except (ValueError, TypeError, KeyError, AttributeError, json.JSONDecodeError):
+                self._respond(400, {"error": "Lançamento inválido"})
+                return
+            con = sqlite3.connect(str(db_path), timeout=15)
+            con.row_factory = sqlite3.Row
+            try:
+                con.execute("PRAGMA busy_timeout=15000")
+                con.execute("BEGIN IMMEDIATE")
+                current = con.execute("SELECT role,active FROM access_user WHERE id=?", (identity["id"],)).fetchone()
+                if not current or not current["active"] or current["role"] not in ("admin", "financeiro"):
+                    con.rollback()
+                    self._respond(403, {"error": "Sem permissão para gravar"})
+                    return
+                cursor = con.execute(
+                    "INSERT INTO financial_entry(competence_date,description,amount_cents,entry_type,status) VALUES(?,?,?,?,?)",
+                    (day,name,amount,kind,status),
+                )
+                entry_id = cursor.lastrowid
+                con.execute(
+                    "INSERT INTO audit_log(entity,entity_id,action,snapshot_json) VALUES(?,?,?,?)",
+                    ("financial_entry",entry_id,"CREATE",json.dumps({"source":"remote_api","actor_id":identity["id"],"description":name,"amount_cents":amount})),
+                )
+                con.commit()
+                self._respond(201, {"id": entry_id})
+            except sqlite3.Error:
+                con.rollback()
+                self._respond(503, {"error": "Falha ao registrar lançamento"})
+            finally:
+                con.close()
 
         def do_GET(self):
             path = urlsplit(self.path).path
