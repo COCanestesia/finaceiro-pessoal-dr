@@ -14,6 +14,7 @@ dev = ["pytest>=8", "pytest-qt>=4.4"]
 
 [project.scripts]
 financeiro-pessoal-dr = "financeiro_dr.main:main"
+financeiro-dr-servidor = "financeiro_dr.network.read_api:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
