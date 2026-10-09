@@ -44,3 +44,22 @@ def export_entries_csv(connection: sqlite3.Connection, destination: Path) -> Pat
         for row in rows:
             writer.writerow([row[column] if row[column] is not None else "" for column in columns])
     return destination
+
+
+def automatic_daily_backup(connection: sqlite3.Connection, backup_dir: Path, day=None) -> Path:
+    """Keep a consistent daily backup without overwriting an existing copy."""
+    from datetime import date
+    day = day or date.today()
+    backup_dir = Path(backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    target = backup_dir / f"FinanceiroDR-{day.isoformat()}.db"
+    if target.exists():
+        # Existing backups must not be silently overwritten.
+        check = sqlite3.connect(f"file:{target.as_posix()}?mode=ro", uri=True)
+        try:
+            if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("O backup diário existente está danificado.")
+        finally:
+            check.close()
+        return target
+    return create_backup(connection, target)
