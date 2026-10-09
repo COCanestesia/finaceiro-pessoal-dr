@@ -4,7 +4,7 @@ from financeiro_dr.database.migrations import MigrationRunner
 def test_migrations_are_idempotent(tmp_path):
     con=Database(tmp_path/"f.db").connect()
     try:
-        runner=MigrationRunner(); runner.apply_all(con); runner.apply_all(con); assert con.execute("select count(*) from schema_migrations").fetchone()[0]==2
+        runner=MigrationRunner(); runner.apply_all(con); runner.apply_all(con); assert con.execute("select count(*) from schema_migrations").fetchone()[0]==3
     finally: con.close()
 
 def test_core_migration_creates_required_financial_columns(tmp_path):
