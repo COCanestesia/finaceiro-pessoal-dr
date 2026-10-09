@@ -33,6 +33,16 @@ class RemoteReadClient:
         self.token = response["token"]
         return response["user"]
 
+    def create_entry(self, competence_date: str, description: str, amount_cents: int,
+                     entry_type: str, status: str) -> int:
+        if not self.token:
+            raise PermissionError("Faça login antes de registrar.")
+        response = self._request("/v1/entries", {
+            "competence_date": competence_date, "description": description,
+            "amount_cents": amount_cents, "entry_type": entry_type, "status": status,
+        })
+        return int(response["id"])
+
     def entries(self) -> list[dict]:
         if not self.token:
             raise PermissionError("Faça login antes de consultar.")
