@@ -23,6 +23,7 @@ from financeiro_dr.ui.pages.entries_page import EntriesPage
 from financeiro_dr.ui.pages.payables_page import PayablesPage
 from financeiro_dr.ui.pages.receivables_page import ReceivablesPage
 from financeiro_dr.ui.pages.settings_page import SettingsPage
+from financeiro_dr.ui.pages.history_page import HistoryPage
 
 
 def build_window(connection) -> MainWindow:
@@ -37,7 +38,7 @@ def build_window(connection) -> MainWindow:
     window.add_page("payables", "Contas a Pagar", PayablesPage(payables))
     window.add_page("receivables", "Contas a Receber", ReceivablesPage(payables))
     window.add_page("agenda", "Agenda Financeira", AgendaPage(agenda))
-    window.add_page("history", "Histórico", QLabel("Histórico detalhado será ampliado nas próximas etapas."))
+    window.add_page("history", "Histórico", HistoryPage(connection))
     window.add_page("settings", "Configurações", SettingsPage(connection))
     return window
 
