@@ -13,7 +13,7 @@ def test_build_window_registers_daily_finance_pages(qtbot, tmp_path):
     try:
         window = build_window(con)
         qtbot.addWidget(window)
-        assert window.stack.count() == 9
+        assert window.stack.count() == 10
         assert set(window._page_indexes) == {
             "dashboard",
             "entries",
@@ -22,6 +22,7 @@ def test_build_window_registers_daily_finance_pages(qtbot, tmp_path):
             "agenda",
             "banks",
             "statements",
+            "reports",
             "history",
             "settings",
         }
