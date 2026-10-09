@@ -17,4 +17,7 @@ class MainWindow(QMainWindow):
         if len(self._page_indexes)==1: self.show_page(key)
     def show_page(self,key:str)->None:
         self.stack.setCurrentIndex(self._page_indexes[key])
+        page = self.stack.currentWidget()
+        if hasattr(page, "refresh_accounts"):
+            page.refresh_accounts()
         for name,button in self._buttons.items(): button.setChecked(name==key)
