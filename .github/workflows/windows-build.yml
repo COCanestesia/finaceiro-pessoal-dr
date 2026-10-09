@@ -3,6 +3,7 @@ name: Windows build
 on:
   push:
     branches:
+      - main
       - feat/phase1-daily-finance
   workflow_dispatch:
 
