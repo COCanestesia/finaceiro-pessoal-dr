@@ -13,6 +13,7 @@ from financeiro_dr.core.financeiro.repository import FinancialRepository
 from financeiro_dr.core.financeiro.scheduling import SchedulingService
 from financeiro_dr.core.financeiro.service import FinancialService
 from financeiro_dr.database.connection import Database
+from financeiro_dr.database.backup import automatic_daily_backup
 from financeiro_dr.database.migrations import MigrationRunner
 from financeiro_dr.security.auth_service import AuthService
 from financeiro_dr.ui.app_window import MainWindow
@@ -47,6 +48,11 @@ def _open_database():
     paths = AppPaths.from_environment()
     connection = Database(paths.database_file).connect()
     MigrationRunner().apply_all(connection)
+    try:
+        automatic_daily_backup(connection, paths.data_dir / 'backups')
+    except Exception:
+        connection.close()
+        raise
     return paths, connection
 
 
