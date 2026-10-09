@@ -9,7 +9,7 @@ from xml.etree import ElementTree
 
 
 def _tag(block: str, name: str) -> str:
-    m = re.search(r"<" + name + r">([^<\\r\\n]+)", block, re.I)
+    m = re.search(r"<" + name + r">([^<\r\n]+)", block, re.I)
     return m.group(1).strip() if m else ""
 
 
