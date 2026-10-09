@@ -68,6 +68,20 @@ def _open_database():
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if '--server' in args:
+        if len(args) != 1:
+            raise ValueError("Use apenas --server para iniciar o serviço privado.")
+        from financeiro_dr.network.read_api import create_server
+        db_path = AppPaths.from_environment().database_file
+        server = create_server(db_path)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+        return 0
+
     if '--restore-backup' in args:
         index = args.index('--restore-backup')
         if len(args) != index + 2:
