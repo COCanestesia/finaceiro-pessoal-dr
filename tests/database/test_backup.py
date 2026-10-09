@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 from financeiro_dr.database.connection import Database
 from financeiro_dr.database.migrations import MigrationRunner
-from financeiro_dr.database.backup import create_backup, export_entries_csv
+from financeiro_dr.database.backup import create_backup, export_entries_csv, automatic_daily_backup
 
 
 def test_backup_is_consistent_and_preserves_auth(tmp_path):
@@ -28,5 +28,24 @@ def test_backup_is_consistent_and_preserves_auth(tmp_path):
             rows = list(csv.DictReader(infile, delimiter=";"))
         assert len(rows) == 1
         assert rows[0]["amount_cents"] == "15025"
+    finally:
+        con.close()
+
+
+def test_daily_backup_is_idempotent_and_preserves_data(tmp_path):
+    from datetime import date
+    con = Database(tmp_path / "daily.db").connect()
+    MigrationRunner().apply_all(con)
+    try:
+        con.execute("INSERT INTO financial_entry(competence_date,description,amount_cents,entry_type,status) VALUES ('2026-10-09','Primeiro',100,'RECEITA','RECEBIDO')")
+        target = automatic_daily_backup(con, tmp_path / "backups", date(2026, 10, 9))
+        assert target.exists()
+        con.execute("INSERT INTO financial_entry(competence_date,description,amount_cents,entry_type,status) VALUES ('2026-10-09','Segundo',200,'RECEITA','RECEBIDO')")
+        assert automatic_daily_backup(con, tmp_path / "backups", date(2026, 10, 9)) == target
+        back = sqlite3.connect(target)
+        try:
+            assert back.execute("SELECT count(*) FROM financial_entry").fetchone()[0] == 1
+        finally:
+            back.close()
     finally:
         con.close()
