@@ -16,6 +16,7 @@ dev = ["pytest>=8", "pytest-qt>=4.4"]
 financeiro-pessoal-dr = "financeiro_dr.main:main"
 financeiro-dr-servidor = "financeiro_dr.network.read_api:main"
 financeiro-dr-criar-admin = "financeiro_dr.network.bootstrap_admin:main"
+financeiro-dr-usuarios = "financeiro_dr.network.accounts_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
