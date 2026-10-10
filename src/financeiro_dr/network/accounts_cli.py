@@ -50,14 +50,16 @@ def main(argv=None) -> int:
         if password != confirmation:
             raise ValueError("Senhas diferentes.")
         if con.execute("SELECT 1 FROM access_user").fetchone():
-            raise PermissionError(
-                "Novos usuários devem ser autorizados pela conta administrativa; "
-                "a interface de autorização ainda está em desenvolvimento."
-            )
-        if role != "admin":
+            admin_name = input("Usuário administrador: ").strip()
+            admin_password = getpass.getpass("Senha do administrador: ")
+            actor = AccessService(con).authenticate(admin_name, admin_password)
+            AccessService.require_permission(actor, "users")
+            if actor["role"] != "admin":
+                raise PermissionError("Administrador necessário.")
+        elif role != "admin":
             raise PermissionError("A primeira conta deve ser administradora.")
         add_account(con, username, display_name, role, password)
-        print("Administrador inicial cadastrado.")
+        print("Usuário cadastrado.")
         return 0
     finally:
         con.close()
